@@ -64,7 +64,8 @@ var (
 		"tls.insecure-skip-verify",
 		"Ignore certificate and server verification when using a tls connection.",
 	).Bool()
-	dsn string
+	dsn    string
+	dsnMap map[string]string
 )
 
 // scrapers lists all possible collection methods and if they should be enabled by default.
@@ -183,6 +184,8 @@ func init() {
 
 func newHandler(metrics collector.Metrics, scrapers []collector.Scraper, logger log.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		dbHost := r.URL.Query().Get("host")
+		realDsn := dsnMap[dbHost]
 		filteredScrapers := scrapers
 		params := r.URL.Query()["collect[]"]
 		// Use request context for cancellation when connection gets closed.
@@ -226,7 +229,7 @@ func newHandler(metrics collector.Metrics, scrapers []collector.Scraper, logger 
 		}
 
 		registry := prometheus.NewRegistry()
-		registry.MustRegister(collector.New(ctx, dsn, metrics, filteredScrapers, logger))
+		registry.MustRegister(collector.New(ctx, realDsn, metrics, filteredScrapers, logger))
 
 		gatherers := prometheus.Gatherers{
 			prometheus.DefaultGatherer,
@@ -284,6 +287,15 @@ func main() {
 			level.Info(logger).Log("msg", "Error parsing my.cnf", "file", *configMycnf, "err", err)
 			os.Exit(1)
 		}
+	}
+
+	dsnArr := strings.Split(dsn, ",")
+	for _, single := range dsnArr {
+		singleArr := strings.Split(single, "@")
+		host := strings.Trim(singleArr[1], "(")
+		host = strings.Trim(host, ")")
+		host = strings.Trim(host, "/")
+		dsnMap[singleArr[1]] = single
 	}
 
 	// Register only scrapers enabled by flag.
